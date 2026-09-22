@@ -12,7 +12,7 @@
       <span class="logo">⏪</span>
       <div>
         <h1>配置变更回放台</h1>
-        <p class="subtitle">按资源串联版本事件 · 检测冲突 · 可视化回放 · 导出 JSON</p>
+        <p class="subtitle">按资源串联版本事件 · 检测冲突 · 可视化回放 · 分支推演 · 导出 JSON</p>
       </div>
     </div>
     <div class="topbar-stats" id="topStats"></div>
@@ -77,6 +77,9 @@
           </div>
         </div>
       </div>
+
+      <!-- 分支推演:从时间线某事件建立基点后出现,仅存在于浏览器会话 -->
+      <div class="card branch-card hidden" id="branchCard"></div>
 
       <div class="card">
         <h2 class="timeline-title">

@@ -278,9 +278,144 @@ form input:focus, form textarea:focus {
 
 .muted { color: var(--muted); }
 .empty { text-align: center; padding: 30px 0; color: var(--muted); font-size: 13px; }
+.hidden { display: none; }
+.mono { font-family: var(--mono); }
+
+/* ---------- 分支推演 ---------- */
+.branch-card { border-color: rgba(167,139,250,.55); }
+.branch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.branch-head h2 { margin: 0; color: var(--purple); }
+.branch-meta { font-size: 12.5px; margin: 0 0 14px; color: var(--muted); }
+.branch-meta b { color: var(--text); }
+.btn.linkish {
+  background: none;
+  border: none;
+  color: var(--accent);
+  padding: 0 4px;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.diff-board {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.diff-col, .diff-mid {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-height: 120px;
+}
+.diff-mid { overflow: auto; }
+.diff-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.diff-row td {
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.diff-row:last-child td { border-bottom: none; }
+.diff-key { font-weight: 600; white-space: nowrap; }
+.diff-vals {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  word-break: break-word;
+}
+.diff-vals .ok { color: var(--ok); }
+.diff-vals .warn { color: var(--warn); }
+.diff-vals .danger { color: var(--danger); }
+.diff-kind {
+  display: inline-block;
+  border-radius: 5px;
+  padding: 0 7px;
+  font-size: 10.5px;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.diff-kind.added { background: rgba(62,207,142,.15); color: var(--ok); }
+.diff-kind.modified { background: rgba(245,181,68,.15); color: var(--warn); }
+.diff-kind.removed { background: rgba(255,107,107,.15); color: var(--danger); }
+.diff-empty {
+  color: var(--ok);
+  font-size: 12.5px;
+  padding: 10px 4px;
+}
+.diff-cause { white-space: nowrap; }
+
+.hypo-title { margin: 14px 0 8px; }
+.hypo-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.hypo-row-ev {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.hypo-row-ev.accepted { border-left-color: var(--ok); }
+.hypo-row-ev.gap { border-left-color: var(--warn); }
+.hypo-row-ev.rejected_conflict { border-left-color: var(--danger); }
+.hypo-row-ev.flash { box-shadow: 0 0 0 2px var(--purple); }
+.hypo-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.hypo-seq {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--purple);
+}
+.hypo-note { font-size: 12px; }
+.hypo-head .t-tags { margin-left: auto; display: flex; gap: 6px; }
+.hypo-payload {
+  margin: 6px 0 0;
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 8px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  overflow: auto;
+}
+.hypo-row-ev .banner { margin-top: 6px; padding: 5px 10px; font-size: 12px; }
+
+.hypo-form { border-top: 1px solid var(--border); padding-top: 12px; }
+.hypo-row {
+  display: flex;
+  gap: 10px;
+}
+.hypo-row label { flex: 1; }
+.hypo-row label.grow { flex: 1; }
+.hypo-row label.grow2 { flex: 2; }
+.hypo-actions { display: flex; align-items: center; gap: 12px; }
+.hypo-actions .btn.primary { width: auto; }
+
+.btn.mini {
+  padding: 1px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+.tag.branch-base-tag {
+  background: rgba(167,139,250,.18);
+  color: var(--purple);
+}
+.t-event.base { box-shadow: 0 0 0 2px rgba(167,139,250,.75); }
+.t-event.base.current { box-shadow: 0 0 0 2px var(--accent); }
 
 /* ---------- 响应式 ---------- */
+@media (max-width: 1100px) {
+  .diff-board { grid-template-columns: 1fr; }
+}
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .state-board { grid-template-columns: 1fr; }
+  .hypo-row { flex-direction: column; gap: 0; }
 }
