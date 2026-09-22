@@ -12,6 +12,7 @@
     这样检测严格按"到达顺序"回放,符合"回放台"语义。
 """
 
+import copy
 import json
 import os
 import sqlite3
@@ -137,34 +138,45 @@ def annotate(rows):
 
     annotated = []
     for resource, ev_rows in by_resource.items():
-        ev_rows.sort(key=lambda r: r["received_seq"])
-        expected = 0          # 下一个期望版本
-        applied_version = -1  # 已接受的最高版本
-        for row in ev_rows:
-            v = row["version"]
-            ev = dict(row)
-            ev["payload"] = _parse_payload(row["payload"])
-            ev["expected_version"] = expected
-            ev["applied_version"] = applied_version
-            ev["conflict_with"] = None
-
-            if v < expected:
-                # 该版本(或更高)此前已接受:旧版本/重复版本晚到。
-                ev["status"] = "rejected_conflict"
-                ev["conflict_with"] = applied_version
-            elif v == expected:
-                ev["status"] = "accepted"
-                applied_version = v
-                expected = v + 1
-            else:  # v > expected:版本跳跃,接受但标记间隙;
-                  # 版本链从 v 继续,缺失版本之后补到将被判为晚到冲突。
-                ev["status"] = "gap"
-                applied_version = v
-                expected = v + 1
-            annotated.append(ev)
+        annotated.extend(_annotate_resource(ev_rows))
 
     annotated.sort(key=lambda e: e["received_seq"])
     return annotated
+
+
+def _annotate_resource(ev_rows):
+    """标注单个资源的一组事件(按 received_seq 到达顺序回放)。
+
+    基线回放与分支推演共用同一套规则,保证假设事件与真实事件判定一致。
+    """
+    ev_rows = sorted(ev_rows, key=lambda r: r["received_seq"])
+    expected = 0          # 下一个期望版本
+    applied_version = -1  # 已接受的最高版本
+    out = []
+    for row in ev_rows:
+        v = row["version"]
+        ev = dict(row)
+        if not isinstance(ev.get("payload"), (dict, list)):
+            ev["payload"] = _parse_payload(row["payload"])
+        ev["expected_version"] = expected
+        ev["applied_version"] = applied_version
+        ev["conflict_with"] = None
+
+        if v < expected:
+            # 该版本(或更高)此前已接受:旧版本/重复版本晚到。
+            ev["status"] = "rejected_conflict"
+            ev["conflict_with"] = applied_version
+        elif v == expected:
+            ev["status"] = "accepted"
+            applied_version = v
+            expected = v + 1
+        else:  # v > expected:版本跳跃,接受但标记间隙;
+              # 版本链从 v 继续,缺失版本之后补到将被判为晚到冲突。
+            ev["status"] = "gap"
+            applied_version = v
+            expected = v + 1
+        out.append(ev)
+    return out
 
 
 def query_events(db, resource=None):
@@ -206,6 +218,188 @@ def resource_summary(db):
             }
         )
     return result
+
+
+# --------------------------------------------------------------------------- #
+# 分支推演(纯内存计算,绝不写入 SQLite)
+# --------------------------------------------------------------------------- #
+def apply_payload(prev, payload):
+    """应用一条事件的 payload,返回新配置。
+
+    约定与前端一致:
+      {"set": {...}, "remove": ["k"]} 做键级合并/覆盖与删除;
+      不含 set/remove 的 payload 整体替换为新配置;
+      被拒绝(rejected_conflict)的事件不应用。
+    """
+    next_cfg = copy.deepcopy(prev if prev is not None else {})
+    if (
+        isinstance(payload, dict)
+        and ("set" in payload or "remove" in payload)
+    ):
+        if not isinstance(next_cfg, dict):
+            next_cfg = {}
+        if isinstance(payload.get("set"), dict):
+            next_cfg.update(copy.deepcopy(payload["set"]))
+        if isinstance(payload.get("remove"), list):
+            for key in payload["remove"]:
+                next_cfg.pop(key, None)
+        return next_cfg
+    return copy.deepcopy(payload if payload is not None else {})
+
+
+def apply_events(events, initial=None):
+    """按顺序应用事件(冲突事件跳过),返回最终配置与逐事件快照。"""
+    cfg = copy.deepcopy(initial) if initial is not None else None
+    snapshots = []
+    for ev in events:
+        if ev["status"] != "rejected_conflict":
+            cfg = apply_payload(cfg, ev["payload"])
+        snapshots.append(copy.deepcopy(cfg if cfg is not None else {}))
+    return cfg if cfg is not None else {}, snapshots
+
+
+def config_diff(base, branch):
+    """两份最终配置的逐键差异:added / modified / removed。
+
+    配置为 JSON 对象时按顶层键比较;整体替换产生的非对象值用空串键表示。
+    """
+    added, modified, removed = [], [], []
+    if isinstance(base, dict) and isinstance(branch, dict):
+        for key in branch:
+            if key not in base:
+                added.append({"key": key, "value": copy.deepcopy(branch[key])})
+            elif base[key] != branch[key]:
+                modified.append(
+                    {
+                        "key": key,
+                        "base_value": copy.deepcopy(base[key]),
+                        "branch_value": copy.deepcopy(branch[key]),
+                    }
+                )
+        for key in base:
+            if key not in branch:
+                removed.append({"key": key, "value": copy.deepcopy(base[key])})
+    else:
+        if base != branch:
+            modified.append(
+                {
+                    "key": "",
+                    "base_value": copy.deepcopy(base),
+                    "branch_value": copy.deepcopy(branch),
+                }
+            )
+    added.sort(key=lambda d: d["key"])
+    modified.sort(key=lambda d: d["key"])
+    removed.sort(key=lambda d: d["key"])
+    return {"added": added, "modified": modified, "removed": removed}
+
+
+def event_changes(before, after):
+    """一条已应用事件相对应用前快照的新增/修改/删除键(便于定位差异来源)。"""
+    diff = config_diff(before, after)
+    changed = [d["key"] for d in diff["added"] + diff["modified"] + diff["removed"]]
+    return {"added": diff["added"], "modified": diff["modified"],
+            "removed": diff["removed"], "keys": changed}
+
+
+def branch_simulation(db, resource, base_event_id, hypotheses):
+    """重建基点状态并推演假设事件,全程只读。
+
+    步骤:
+      1. 按原到达顺序取出该资源基点(含)之前的真实事件,用统一规则重放;
+      2. 假设事件挂在基点之后,沿用 accepted / gap / rejected_conflict 规则标注;
+      3. 分别累积出基线与分支的最终配置,做逐键 diff 并把每个差异键
+         归因到最后一次触碰它的分支事件。
+    """
+    rows = db.execute(
+        "SELECT * FROM events WHERE resource = ? ORDER BY received_seq",
+        (resource,),
+    ).fetchall()
+    by_id = {r["id"]: r for r in rows}
+
+    base_seq = 0
+    if base_event_id is not None:
+        if base_event_id not in by_id:
+            return None
+        base_seq = by_id[base_event_id]["received_seq"]
+
+    base_rows = [r for r in rows if r["received_seq"] <= base_seq]
+    baseline = _annotate_resource(base_rows)
+
+    # 假设事件合成内存行,received_seq 接在基点之后;不落库。
+    max_seq = max((r["received_seq"] for r in rows), default=0)
+    synth_rows = []
+    for i, item in enumerate(hypotheses):
+        synth_rows.append(
+            {
+                "id": None,
+                "resource": resource,
+                "version": item["version"],
+                "author": item.get("author") or "anonymous",
+                "payload": item["payload"],
+                "note": item.get("note", ""),
+                "received_seq": max_seq + 1 + i,
+                "created_at": None,
+                "branch_index": i,
+            }
+        )
+
+    branch_events = _annotate_resource(base_rows + synth_rows)[len(base_rows):]
+
+    base_config, _ = apply_events(baseline)
+    final_config, snapshots = apply_events(branch_events, initial=base_config)
+
+    # 每条分支事件相对应用前的键级变化;冲突事件不应用,changes 为空。
+    changes = []
+    for i, ev in enumerate(branch_events):
+        before = snapshots[i - 1] if i > 0 else copy.deepcopy(base_config)
+        if ev["status"] == "rejected_conflict":
+            changes.append({"added": [], "modified": [], "removed": [], "keys": []})
+        else:
+            changes.append(event_changes(before, snapshots[i]))
+    for ev, ch in zip(branch_events, changes):
+        ev["changes"] = ch
+
+    diff = config_diff(base_config, final_config)
+
+    # 差异归因:最后一次触碰该键的分支事件(被拒绝的事件不触碰任何键)。
+    last_touch = {}
+    for i, ch in enumerate(changes):
+        for key in ch["keys"]:
+            last_touch[key] = i
+    causes = {}
+    for part in (diff["added"], diff["modified"], diff["removed"]):
+        for item in part:
+            idx = last_touch.get(item["key"])
+            if idx is not None:
+                ev = branch_events[idx]
+                causes[item["key"]] = {
+                    "branch_index": idx,
+                    "version": ev["version"],
+                    "received_seq": ev["received_seq"],
+                    "status": ev["status"],
+                    "note": ev.get("note", ""),
+                }
+
+    base_event = next(
+        (
+            {"id": e["id"], "version": e["version"], "received_seq": e["received_seq"]}
+            for e in reversed(baseline)
+            if e["id"] is not None
+        ),
+        None,
+    )
+    return {
+        "resource": resource,
+        "base_event_id": base_event_id,
+        "base_event": base_event,
+        "baseline_events": baseline,
+        "branch_events": branch_events,
+        "baseline_config": base_config,
+        "branch_config": final_config,
+        "diff": diff,
+        "caused_by": causes,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -270,6 +464,70 @@ def api_create_event():
     evs = query_events(db, resource)
     created = next(e for e in evs if e["id"] == cur.lastrowid)
     return jsonify({"event": created, "resources": resource_summary(db)}), 201
+
+
+@app.post("/api/simulate")
+def api_simulate():
+    """分支推演:基点重建 + 假设事件标注。只读,绝不写入 SQLite。
+
+    body:
+      resource       资源名(必填)
+      base_event_id  基点事件 id;null 表示从空状态起推演
+      events         假设事件列表,字段 version/author/note/payload,
+                     仅在本次请求内存在,按列表顺序挂在基点之后
+    """
+    body = request.get_json(silent=True) or {}
+    resource = str(body.get("resource", "")).strip()
+    if not resource:
+        return jsonify({"error": "resource 不能为空"}), 400
+
+    if "base_event_id" in body and body["base_event_id"] is not None:
+        base_event_id = body["base_event_id"]
+        if not isinstance(base_event_id, int) or isinstance(base_event_id, bool):
+            return jsonify({"error": "base_event_id 必须是整数或 null"}), 400
+    else:
+        base_event_id = None
+
+    hypotheses = body.get("events", [])
+    if not isinstance(hypotheses, list):
+        return jsonify({"error": "events 必须是数组"}), 400
+    if len(hypotheses) > 200:
+        return jsonify({"error": "单次推演假设事件不能超过 200 条"}), 400
+
+    clean = []
+    for i, item in enumerate(hypotheses):
+        if not isinstance(item, dict):
+            return jsonify({"error": f"第 {i + 1} 条假设事件格式错误"}), 400
+        version = item.get("version")
+        if not isinstance(version, int) or isinstance(version, bool) or version < 0:
+            return jsonify(
+                {"error": f"第 {i + 1} 条假设事件的 version 必须是非负整数"}
+            ), 400
+        payload = item.get("payload", {})
+        if not isinstance(payload, (dict, list)):
+            return jsonify(
+                {"error": f"第 {i + 1} 条假设事件的 payload 必须是 JSON 对象或数组"}
+            ), 400
+        clean.append(
+            {
+                "version": version,
+                "payload": payload,
+                "author": str(item.get("author", "")).strip(),
+                "note": str(item.get("note", "")).strip(),
+            }
+        )
+
+    db = get_db()
+    exists = db.execute(
+        "SELECT 1 FROM events WHERE resource = ? LIMIT 1", (resource,)
+    ).fetchone()
+    if not exists:
+        return jsonify({"error": f"资源 {resource} 不存在"}), 404
+
+    result = branch_simulation(db, resource, base_event_id, clean)
+    if result is None:
+        return jsonify({"error": "基点事件不存在或不属于该资源"}), 404
+    return jsonify(result)
 
 
 @app.get("/api/export")
