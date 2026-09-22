@@ -1,0 +1,16 @@
+services:
+  replay:
+    build: .
+    container_name: config-replay
+    ports:
+      - "8000:8000"
+    volumes:
+      - replay-data:/data
+    environment:
+      # 数据库为空时自动写入演示数据(含冲突场景)。设为 0 可关闭。
+      SEED_DEMO: "1"
+      REPLAY_DB_PATH: /data/replay.db
+    restart: unless-stopped
+
+volumes:
+  replay-data:

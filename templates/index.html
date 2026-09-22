@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>配置变更回放台</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⏪</span>
+      <div>
+        <h1>配置变更回放台</h1>
+        <p class="subtitle">按资源串联版本事件 · 检测冲突 · 可视化回放 · 导出 JSON</p>
+      </div>
+    </div>
+    <div class="topbar-stats" id="topStats"></div>
+  </header>
+
+  <main class="layout">
+    <!-- 左:提交 + 筛选 -->
+    <aside class="side">
+      <section class="card">
+        <h2>① 提交变更事件</h2>
+        <form id="eventForm">
+          <label>资源名 <input name="resource" required placeholder="如 server-01" /></label>
+          <label>版本号(非负整数)
+            <input name="version" type="number" min="0" step="1" value="0" required />
+          </label>
+          <label>提交者 <input name="author" placeholder="anonymous" /></label>
+          <label>变更 payload(JSON)
+            <textarea name="payload" rows="6" spellcheck="false">{
+  "set": {"key": "value"}
+}</textarea>
+          </label>
+          <label>备注 <input name="note" placeholder="可选" /></label>
+          <button type="submit" class="btn primary">提交事件</button>
+          <p class="form-msg" id="formMsg"></p>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>② 按资源筛选</h2>
+        <div id="resourceList" class="resource-list">
+          <p class="muted">加载中…</p>
+        </div>
+        <div class="toolbar">
+          <button class="btn" id="resetFilter">查看全部</button>
+          <button class="btn ghost" id="exportBtn">⬇ 导出当前结果 JSON</button>
+        </div>
+      </section>
+    </aside>
+
+    <!-- 右:回放面板 -->
+    <section class="main-col">
+      <div class="card replay-card">
+        <div class="replay-head">
+          <h2>③ 变更时间线与回放</h2>
+          <div class="replay-controls">
+            <button class="btn icon" id="prevStep" title="上一步">◀</button>
+            <span class="step-indicator"><b id="stepCur">0</b> / <span id="stepTotal">0</span></span>
+            <button class="btn icon" id="nextStep" title="下一步">▶</button>
+            <button class="btn" id="playBtn">自动播放</button>
+            <button class="btn ghost" id="resetReplay">重置</button>
+          </div>
+        </div>
+
+        <div class="state-board">
+          <div class="state-col">
+            <h3>当前配置状态</h3>
+            <pre id="stateView" class="state-view">// 提交或播放事件后,这里展示按版本应用后的累积配置</pre>
+          </div>
+          <div class="state-col" id="detailCol">
+            <h3>当前事件</h3>
+            <div id="eventDetail" class="event-detail muted">尚未播放</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="timeline-title">
+          事件时间线 <span class="muted" id="filterTag"></span>
+        </h2>
+        <div id="timeline" class="timeline"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
